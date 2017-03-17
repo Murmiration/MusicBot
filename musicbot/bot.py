@@ -488,6 +488,29 @@ class MusicBot(discord.Client):
 
         return msg
 
+    async def safe_send_embed(self, dest, content, title, emname, aviurl, *, tts=False, expire_in=0, also_delete=None, quiet=False):
+        emmsg = None
+        try:
+            embed1 = discord.Embed(title=title, description=content, colour=0xDEAD8F)
+            embed1.set_author(name=emname, icon_url=aviurl)
+            emmsg = await self.send_message(dest, embed=embed1, tts=tts)
+
+            if emmsg and expire_in:
+                asyncio.ensure_future(self._wait_delete_msg(msg, expire_in))
+
+            if also_delete and isinstance(also_delete, discord.Message):
+                asyncio.ensure_future(self._wait_delete_msg(also_delete, expire_in))
+
+        except discord.Forbidden:
+            if not quiet:
+                self.safe_print("Warning: Cannot send message to %s, no permission" % dest.name)
+
+        except discord.NotFound:
+            if not quiet:
+                self.safe_print("Warning: Cannot send message to %s, invalid channel?" % dest.name)
+
+        return emmsg
+
     async def safe_delete_message(self, message, *, quiet=False):
         try:
             return await self.delete_message(message)
@@ -944,12 +967,12 @@ class MusicBot(discord.Client):
             # Different playlists might download at different speeds though
             wait_per_song = 1.2
 
-            procmesg = await self.safe_send_message(
+            procmesg = await self.safe_send_embed(
                 channel,
                 'Gathering playlist information for {} songs{}'.format(
                     num_songs,
                     ', ETA: {} seconds'.format(self._fixg(
-                        num_songs * wait_per_song)) if num_songs >= 10 else '.'))
+                        num_songs * wait_per_song)) if num_songs >= 10 else '.'), None, "Processing", None)
 
             # We don't have a pretty way of doing this yet.  We need either a loop
             # that sends these every 10 seconds or a nice context manager.
@@ -1048,8 +1071,8 @@ class MusicBot(discord.Client):
         num_songs = sum(1 for _ in info['entries'])
         t0 = time.time()
 
-        busymsg = await self.safe_send_message(
-            channel, "Processing %s songs..." % num_songs)  # TODO: From playlist_title
+        busymsg = await self.safe_send_embed(
+            channel, "Processing %s songs..." % num_songs, None, "Processing", None)  # TODO: From playlist_title
         await self.send_typing(channel)
 
         entries_added = 0
@@ -1276,12 +1299,12 @@ class MusicBot(discord.Client):
             prog_str = '`[%s/%s]`' % (song_progress, song_total)
 
             if player.current_entry.meta.get('channel', False) and player.current_entry.meta.get('author', False):
-                np_text = "Now Playing: **%s** added by **%s** %s\n" % (
+                np_text = "**%s** added by **%s** %s\n" % (
                     player.current_entry.title, player.current_entry.meta['author'].name, prog_str)
             else:
-                np_text = "Now Playing: **%s** %s\n" % (player.current_entry.title, prog_str)
+                np_text = "**%s** %s\n" % (player.current_entry.title, prog_str)
 
-            self.server_specific_data[server]['last_np_msg'] = await self.safe_send_message(channel, np_text)
+            self.server_specific_data[server]['last_np_msg'] = await self.safe_send_embed(channel, np_text, None, "Now Playing:", "https://aww.moe/k2k66a.png")
             await self._manual_delete_check(message)
         else:
             return Response(
@@ -1803,7 +1826,7 @@ class MusicBot(discord.Client):
         return Response(":hear_no_evil:", delete_after=20)
 
     async def cmd_restart(self, channel):
-        await self.safe_send_message(channel, ":wave:")
+        await self.safe_send_embed(channel, "", None, "Bot Restarting", "https://aww.moe/q7r73d.png")
         await self.disconnect_all_voice_clients()
         raise exceptions.RestartSignal
 
@@ -1946,9 +1969,12 @@ class MusicBot(discord.Client):
             expirein = e.expire_in if self.config.delete_messages else None
             alsodelete = message if self.config.delete_invoking else None
 
-            await self.safe_send_message(
+            await self.safe_send_embed(
                 message.channel,
                 '```\n%s\n```' % e.message,
+                None,
+                "Error!",
+                "https://aww.moe/uo1opj.png",
                 expire_in=expirein,
                 also_delete=alsodelete
             )
@@ -1959,7 +1985,7 @@ class MusicBot(discord.Client):
         except Exception:
             traceback.print_exc()
             if self.config.debug_mode:
-                await self.safe_send_message(message.channel, '```\n%s\n```' % traceback.format_exc())
+                await self.safe_send_embed(message.channel, '```\n%s\n```' % traceback.format_exc(), None, "Error!", "https://aww.moe/uo1opj.png")
 
     async def on_voice_state_update(self, before, after):
         if not all([before, after]):
